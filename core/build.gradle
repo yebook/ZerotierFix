@@ -8,6 +8,7 @@ android {
     defaultConfig {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
+        ndkVersion rootProject.ext.ndkVersion
         versionCode 1
         versionName "1.0"
 
@@ -28,7 +29,7 @@ android {
     externalNativeBuild {
         cmake {
             path file('../externals/core/java/CMakeLists.txt')
-            version '3.22.1'
+            version rootProject.ext.cmakeVersion
         }
     }
 

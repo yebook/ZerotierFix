@@ -24,6 +24,8 @@ ext {
     compileSdkVersion = 33
     minSdkVersion = 19
     targetSdkVersion = 33
+    ndkVersion = '28.0.13004108'
+    cmakeVersion = '3.31.5'
 }
 
 task clean(type: Delete) {
