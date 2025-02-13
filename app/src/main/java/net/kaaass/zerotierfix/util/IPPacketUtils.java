@@ -18,7 +18,7 @@ public class IPPacketUtils {
             try {
                 return InetAddress.getByAddress(bArr2);
             } catch (UnknownHostException e) {
-                Log.e(TAG, "Error creating InetAddress", e);
+                Log.e(TAG, "Error creating InetAddress: " + e.getMessage(), e);
                 return null;
             }
         } else if (iPVersion == 6) {
@@ -27,7 +27,7 @@ public class IPPacketUtils {
             try {
                 return InetAddress.getByAddress(bArr3);
             } catch (UnknownHostException e) {
-                Log.e(TAG, "Error creating InetAddress", e);
+                Log.e(TAG, "Error creating InetAddress: " + e.getMessage(), e);
                 return null;
             }
         } else {
@@ -44,7 +44,7 @@ public class IPPacketUtils {
             try {
                 return InetAddress.getByAddress(bArr2);
             } catch (UnknownHostException e) {
-                Log.e(TAG, "Error creating InetAddress", e);
+                Log.e(TAG, "Error creating InetAddress: " + e.getMessage(), e);
                 return null;
             }
         } else if (iPVersion == 6) {
@@ -53,7 +53,7 @@ public class IPPacketUtils {
             try {
                 return InetAddress.getByAddress(bArr3);
             } catch (UnknownHostException e) {
-                Log.e(TAG, "Error creating InetAddress", e);
+                Log.e(TAG, "Error creating InetAddress: " + e.getMessage(), e);
                 return null;
             }
         } else {
@@ -69,7 +69,7 @@ public class IPPacketUtils {
     public static long calculateChecksum(byte[] bArr, long j, int i, int i2) {
         int i3 = i2 - i;
         while (i3 > 1) {
-            j += (65280 & (bArr[i] << 8)) | (bArr[i + 1] & 255);
+            j += (long) ((65280 & (bArr[i] << 8)) | (bArr[i + 1] & 255));
             if ((-65536 & j) > 0) {
                 j = (j & 65535) + 1;
             }
@@ -77,7 +77,7 @@ public class IPPacketUtils {
             i3 -= 2;
         }
         if (i3 > 0) {
-            j += (bArr[i] << 8) & MotionEventCompat.ACTION_POINTER_INDEX_MASK;
+            j += (long) ((bArr[i] << 8) & MotionEventCompat.ACTION_POINTER_INDEX_MASK);
             if ((j & -65536) > 0) {
                 j = (j & 65535) + 1;
             }
