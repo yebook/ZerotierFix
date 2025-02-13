@@ -127,7 +127,6 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
                     buffer.order(ByteOrder.LITTLE_ENDIAN);
                     while (!isInterrupted()) {
                         try {
-                            boolean noDataBeenRead = true;
                             int readCount = TunTapAdapter.this.in.read(buffer.array());
                             if (readCount > 0) {
                                 DebugLog.d(TunTapAdapter.TAG, "Sending packet to ZeroTier. " + readCount + " bytes.");
@@ -142,9 +141,7 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
                                     Log.e(TunTapAdapter.TAG, "Unknown IP version");
                                 }
                                 buffer.clear();
-                                noDataBeenRead = false;
-                            }
-                            if (noDataBeenRead) {
+                            } else {
                                 Thread.sleep(10);
                             }
                         } catch (IOException e) {
@@ -500,7 +497,7 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
         synchronized (this.routeMap) {
             for (Route route : this.routeMap.keySet()) {
                 if (route.belongsToRoute(destAddress)) {
-                    return this.routeMap.get(route);
+                    return this.routeMap.get(route).longValue();
                 }
             }
             return 0;
