@@ -85,7 +85,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
     public static final int MSG_LEAVE_NETWORK = 2;
     public static final String ZT1_NETWORK_ID = "com.zerotier.one.network_id";
     public static final String ZT1_USE_DEFAULT_ROUTE = "com.zerotier.one.use_default_route";
-    private static final String[] DISALLOWED_APPS = {"com.android.vending"};
+    private static final String[] DISALLOWED_APPS = {"com.android.vending", "com.google.android.projection.gearhead"};
     private static final String TAG = "ZT1_Service";
     private static final int ZT_NOTIFICATION_TAG = 5919812;
     private final IBinder mBinder = new ZeroTierBinder();
