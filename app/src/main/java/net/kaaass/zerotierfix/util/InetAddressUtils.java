@@ -18,38 +18,26 @@ public class InetAddressUtils {
      * 获得地址指定 CIDR 的子网掩码
      */
     public static byte[] addressToNetmask(InetAddress address, int cidr) {
-        int length = address.getAddress().length;
-        int subnetLength = length * 8 - cidr;
-        byte[] fullMasked = new byte[length];
-        for (int i = 0; i < length; i++) {
-            fullMasked[i] = -1;
-        }
-        if (length == 4) {
-            // IPv4 地址
-            return ByteBuffer.allocate(4)
-                    .putInt((ByteBuffer.wrap(fullMasked).getInt() >> subnetLength) << subnetLength)
-                    .array();
+        long j;
+        int length = address.getAddress().length * 8;
+        if (address instanceof Inet4Address) {
+            int subnetLength = length - cidr;
+            return ByteBuffer.allocate(4).putInt(subnetLength == 32 ? 0 : -1 << subnetLength).array();
+        } else if (address instanceof Inet6Address) {
+            int subnetLength = length - cidr;
+            long j2 = 0;
+            if (subnetLength == 128) {
+                j = 0;
+            } else if (subnetLength >= 64) {
+                j = 0;
+                j2 = -1 << (subnetLength - 64);
+            } else {
+                j = -1 << subnetLength;
+                j2 = -1;
+            }
+            return ByteBuffer.allocate(16).putLong(j2).putLong(j).array();
         } else {
-            // IPv6 地址
-            if (cidr == 0) {
-                // 若 CIDR 为 0 则返回空子网掩码
-                return new byte[length];
-            }
-            byte[] shiftedAddress = new BigInteger(fullMasked)
-                    .shiftRight(subnetLength)
-                    .shiftLeft(subnetLength)
-                    .toByteArray();
-            if (shiftedAddress.length == length) {
-                return shiftedAddress;
-            }
-            // 高位为 0 时需要在前补 0
-            byte[] netmask = new byte[length];
-            int offset = Math.abs(length - shiftedAddress.length);
-            for (int i = 0; i < offset; i++) {
-                netmask[i] = shiftedAddress[0];
-            }
-            System.arraycopy(shiftedAddress, 0, netmask, offset, shiftedAddress.length);
-            return netmask;
+            throw new RuntimeException("Unreachable");
         }
     }
 
@@ -57,17 +45,13 @@ public class InetAddressUtils {
         if (i == 0) {
             if (inetAddress instanceof Inet4Address) {
                 try {
-                    return Inet4Address.getByAddress(new byte[]{0, 0, 0, 0});
+                    return Inet4Address.getByAddress(new byte[4]);
                 } catch (UnknownHostException unused) {
                     return null;
                 }
             } else if (inetAddress instanceof Inet6Address) {
-                byte[] bArr = new byte[16];
-                for (int i2 = 0; i2 < 16; i2++) {
-                    bArr[i2] = 0;
-                }
                 try {
-                    return Inet6Address.getByAddress(bArr);
+                    return Inet6Address.getByAddress(new byte[16]);
                 } catch (UnknownHostException unused2) {
                     return null;
                 }
@@ -88,7 +72,7 @@ public class InetAddressUtils {
         try {
             return InetAddress.getByAddress(rawAddress);
         } catch (UnknownHostException unused) {
-            Log.e(TAG, "Unknown Host Exception calculating route");
+            Log.e(TAG, "Unknown Host Exception calculating route", unused);
             return null;
         }
     }
