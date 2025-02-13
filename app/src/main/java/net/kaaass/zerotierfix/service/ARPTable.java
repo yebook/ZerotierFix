@@ -26,13 +26,13 @@ public class ARPTable {
                         if (arpEntry.getTime() + ARPTable.ENTRY_TIMEOUT < System.currentTimeMillis()) {
                             Log.d(ARPTable.TAG, "Removing " + arpEntry.getAddress().toString() + " from ARP cache");
                             synchronized (ARPTable.this.macAddressToInetAdddress) {
-                                ARPTable.this.macAddressToInetAdddress.remove(arpEntry.getMac());
+                                ARPTable.this.macAddressToInetAdddress.remove(Long.valueOf(arpEntry.getMac()));
                             }
                             synchronized (ARPTable.this.inetAddressToMacAddress) {
                                 ARPTable.this.inetAddressToMacAddress.remove(arpEntry.getAddress());
                             }
                             synchronized (ARPTable.this.entriesMap) {
-                                ARPTable.this.entriesMap.remove(arpEntry.getMac());
+                                ARPTable.this.entriesMap.remove(Long.valueOf(arpEntry.getMac()));
                             }
                             synchronized (ARPTable.this.ipEntriesMap) {
                                 ARPTable.this.ipEntriesMap.remove(arpEntry.getAddress());
@@ -72,10 +72,10 @@ public class ARPTable {
     /* access modifiers changed from: package-private */
     public void setAddress(InetAddress inetAddress, long j) {
         synchronized (this.inetAddressToMacAddress) {
-            this.inetAddressToMacAddress.put(inetAddress, j);
+            this.inetAddressToMacAddress.put(inetAddress, Long.valueOf(j));
         }
         synchronized (this.macAddressToInetAdddress) {
-            this.macAddressToInetAdddress.put(j, inetAddress);
+            this.macAddressToInetAdddress.put(Long.valueOf(j), inetAddress);
         }
         ARPEntry arpEntry = new ARPEntry(j, inetAddress);
         synchronized (this.entriesMap) {
@@ -88,7 +88,7 @@ public class ARPTable {
 
     private void updateArpEntryTime(long j) {
         synchronized (this.entriesMap) {
-            ARPEntry arpEntry = this.entriesMap.get(j);
+            ARPEntry arpEntry = this.entriesMap.get(Long.valueOf(j));
             if (arpEntry != null) {
                 arpEntry.updateTime();
             }
@@ -123,10 +123,10 @@ public class ARPTable {
     /* access modifiers changed from: package-private */
     public InetAddress getAddressForMac(long j) {
         synchronized (this.macAddressToInetAdddress) {
-            if (!this.macAddressToInetAdddress.containsKey(j)) {
+            if (!this.macAddressToInetAdddress.containsKey(Long.valueOf(j))) {
                 return null;
             }
-            InetAddress inetAddress = this.macAddressToInetAdddress.get(j);
+            InetAddress inetAddress = this.macAddressToInetAdddress.get(Long.valueOf(j));
             updateArpEntryTime(inetAddress);
             return inetAddress;
         }
@@ -143,7 +143,7 @@ public class ARPTable {
     public boolean hasAddressForMac(long j) {
         boolean containsKey;
         synchronized (this.macAddressToInetAdddress) {
-            containsKey = this.macAddressToInetAdddress.containsKey(j);
+            containsKey = this.macAddressToInetAdddress.containsKey(Long.valueOf(j));
         }
         return containsKey;
     }

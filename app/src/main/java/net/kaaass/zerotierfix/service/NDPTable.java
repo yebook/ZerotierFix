@@ -26,13 +26,13 @@ public class NDPTable {
                     for (NDPEntry nDPEntry : new HashMap<>(NDPTable.this.entriesMap).values()) {
                         if (nDPEntry.getTime() + NDPTable.ENTRY_TIMEOUT < System.currentTimeMillis()) {
                             synchronized (NDPTable.this.macAddressToInetAddress) {
-                                NDPTable.this.macAddressToInetAddress.remove(nDPEntry.getMac());
+                                NDPTable.this.macAddressToInetAddress.remove(Long.valueOf(nDPEntry.getMac()));
                             }
                             synchronized (NDPTable.this.inetAddressToMacAddress) {
                                 NDPTable.this.inetAddressToMacAddress.remove(nDPEntry.getAddress());
                             }
                             synchronized (NDPTable.this.entriesMap) {
-                                NDPTable.this.entriesMap.remove(nDPEntry.getMac());
+                                NDPTable.this.entriesMap.remove(Long.valueOf(nDPEntry.getMac()));
                             }
                             synchronized (NDPTable.this.ipEntriesMap) {
                                 NDPTable.this.ipEntriesMap.remove(nDPEntry.getAddress());
