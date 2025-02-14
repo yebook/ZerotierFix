@@ -139,29 +139,49 @@ public class NDPTable {
     }
 
     /* access modifiers changed from: package-private */
-    public byte[] getNeighborSolicitationPacket(InetAddress inetAddress, InetAddress inetAddress2, long j) {
-        byte[] bArr = new byte[72];
-        System.arraycopy(inetAddress.getAddress(), 0, bArr, 0, 16);
-        System.arraycopy(inetAddress2.getAddress(), 0, bArr, 16, 16);
-        System.arraycopy(ByteBuffer.allocate(4).putInt(32).array(), 0, bArr, 32, 4);
-        bArr[39] = 58;
-        bArr[40] = -121;
-        System.arraycopy(inetAddress2.getAddress(), 0, bArr, 48, 16);
-        byte[] array = ByteBuffer.allocate(8).putLong(j).array();
-        bArr[64] = 1;
-        bArr[65] = 1;
-        System.arraycopy(array, 2, bArr, 66, 6);
-        System.arraycopy(ByteBuffer.allocate(2).putShort((short) ((int) IPPacketUtils.calculateChecksum(bArr, 0, 0, 72))).array(), 0, bArr, 42, 2);
+    public ByteBuffer getNeighborSolicitationPacket(InetAddress inetAddress, InetAddress inetAddress2, long j) {
+        ByteBuffer buffer = ByteBuffer.allocateDirect(72);
+        buffer.put(inetAddress.getAddress(), 0, 16);
+        buffer.put(inetAddress2.getAddress(), 0, 16);
+        // Put 32 as an int (4 bytes)
+        buffer.putInt(32);
+        // Put 58 and -121 (2 bytes)
+        buffer.put((byte) 58);
+        buffer.put((byte) -121);
+        // Copy inetAddress2 again (16 bytes)
+        buffer.put(inetAddress2.getAddress(), 0, 16);
+        // Put j as a long (8 bytes)
+        ByteBuffer longBuffer = ByteBuffer.allocate(8).putLong(j);
+        longBuffer.flip(); // Prepare for reading
+        longBuffer.position(2); // Skip the first 2 bytes
+        buffer.put((byte) 1);
+        buffer.put((byte) 1);
+        buffer.put(longBuffer);
+        // Calculate and put checksum (2 bytes)
+        short checksum = (short) IPPacketUtils.calculateChecksum(buffer.array(), 0, 0, 72);
+        buffer.position(42);
+        buffer.putShort(checksum);
+        // Reset position for the next part
+        buffer.position(0);
+        // Fill the first 40 bytes with 0
         for (int i = 0; i < 40; i++) {
-            bArr[i] = 0;
+            buffer.put((byte) 0);
         }
-        bArr[0] = 96;
-        System.arraycopy(ByteBuffer.allocate(2).putShort((short) 32).array(), 0, bArr, 4, 2);
-        bArr[6] = 58;
-        bArr[7] = -1;
-        System.arraycopy(inetAddress.getAddress(), 0, bArr, 8, 16);
-        System.arraycopy(inetAddress2.getAddress(), 0, bArr, 24, 16);
-        return bArr;
+        // Set the first byte to 96
+        buffer.put(0, (byte) 96);
+        // Put 32 as a short (2 bytes) at position 4
+        buffer.putShort(4, (short) 32);
+        // Put 58 and -1 at positions 6 and 7
+        buffer.put(6, (byte) 58);
+        buffer.put(7, (byte) -1);
+        // Copy inetAddress (16 bytes) at position 8
+        buffer.position(8);
+        buffer.put(inetAddress.getAddress());
+        // Copy inetAddress2 (16 bytes) at position 24
+        buffer.position(24);
+        buffer.put(inetAddress2.getAddress());
+        buffer.rewind();
+        return buffer;
     }
 
 }

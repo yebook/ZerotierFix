@@ -148,45 +148,73 @@ public class ARPTable {
         return containsKey;
     }
 
-    public byte[] getRequestPacket(long j, InetAddress inetAddress, InetAddress inetAddress2) {
+    public ByteBuffer getRequestPacket(long j, InetAddress inetAddress, InetAddress inetAddress2) {
         return getARPPacket(1, j, 0, inetAddress, inetAddress2);
     }
 
-    public byte[] getReplyPacket(long j, InetAddress inetAddress, long j2, InetAddress inetAddress2) {
+    public ByteBuffer getReplyPacket(long j, InetAddress inetAddress, long j2, InetAddress inetAddress2) {
         return getARPPacket(2, j, j2, inetAddress, inetAddress2);
     }
 
-    public byte[] getARPPacket(int i, long j, long j2, InetAddress inetAddress, InetAddress inetAddress2) {
-        byte[] bArr = new byte[28];
-        bArr[0] = 0;
-        bArr[1] = 1;
-        bArr[2] = 8;
-        bArr[3] = 0;
-        bArr[4] = 6;
-        bArr[5] = 4;
-        bArr[6] = 0;
-        bArr[7] = (byte) i;
-        System.arraycopy(longToBytes(j), 2, bArr, 8, 6);
-        System.arraycopy(inetAddress.getAddress(), 0, bArr, 14, 4);
-        System.arraycopy(longToBytes(j2), 2, bArr, 18, 6);
-        System.arraycopy(inetAddress2.getAddress(), 0, bArr, 24, 4);
-        return bArr;
+    public ByteBuffer getARPPacket(int operation, long senderMac, long targetMac, InetAddress senderIp, InetAddress targetIp) {
+        ByteBuffer buffer = ByteBuffer.allocateDirect(28);
+
+        // Hardware type (Ethernet)
+        buffer.putShort((short) 0x0001); // 0,1
+
+        // Protocol type (IPv4)
+        buffer.putShort((short) 0x0800); // 2,3
+
+        // Hardware size (MAC address length)
+        buffer.put((byte) 0x06); // 4
+
+        // Protocol size (IPv4 address length)
+        buffer.put((byte) 0x04); // 5
+
+        // Operation code
+        buffer.putShort((short) operation); // 6,7
+
+        // Sender MAC address
+        byte[] senderMacBytes = longToBytes(senderMac);
+        buffer.position(8);
+        buffer.put(senderMacBytes, 2, 6); // 8-13
+
+        // Sender IP address
+        buffer.position(14);
+        buffer.put(senderIp.getAddress()); // 14-17
+
+        // Target MAC address
+        byte[] targetMacBytes = longToBytes(targetMac);
+        buffer.position(18);
+        buffer.put(targetMacBytes, 2, 6); // 18-23
+
+        // Target IP address
+        buffer.position(24);
+        buffer.put(targetIp.getAddress()); // 24-27
+
+        buffer.rewind();
+        return buffer;
     }
 
-    public ARPReplyData processARPPacket(byte[] packetData) {
+    public ARPReplyData processARPPacket(ByteBuffer packetData) {
         InetAddress srcAddress;
         InetAddress dstAddress;
         Log.d(TAG, "Processing ARP packet");
+        int currPos = packetData.position();
 
         // 解析包内 IP、MAC 地址
         byte[] rawSrcMac = new byte[8];
-        System.arraycopy(packetData, 8, rawSrcMac, 2, 6);
+        packetData.position(8);
+        packetData.get(rawSrcMac, 2, 6);
         byte[] rawSrcAddress = new byte[4];
-        System.arraycopy(packetData, 14, rawSrcAddress, 0, 4);
+        packetData.position(14);
+        packetData.get(rawSrcAddress, 0, 4);
         byte[] rawDstMac = new byte[8];
-        System.arraycopy(packetData, 18, rawDstMac, 2, 6);
+        packetData.position(18);
+        packetData.get(rawDstMac, 2, 6);
         byte[] rawDstAddress = new byte[4];
-        System.arraycopy(packetData, 24, rawDstAddress, 0, 4);
+        packetData.position(24);
+        packetData.get(rawDstAddress, 0, 4);
         try {
             srcAddress = InetAddress.getByAddress(rawSrcAddress);
         } catch (Exception unused) {
@@ -209,7 +237,9 @@ public class ARPTable {
         }
 
         // 处理响应行为
-        var packetType = packetData[7];
+        packetData.position(7);
+        var packetType = packetData.get();
+        packetData.position(currPos);
         if (packetType == REQUEST) {
             // ARP 请求，返回应答数据
             Log.d(TAG, "Reply needed");

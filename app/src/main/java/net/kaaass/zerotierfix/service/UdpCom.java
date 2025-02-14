@@ -9,20 +9,21 @@ import com.zerotier.sdk.ResultCode;
 import net.kaaass.zerotierfix.util.DebugLog;
 
 import java.net.DatagramPacket;
-import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
-import java.net.SocketException;
+import java.net.SocketAddress;
 import java.net.SocketTimeoutException;
+import java.nio.ByteBuffer;
+import java.nio.channels.DatagramChannel;
 
 // TODO: clear up
 public class UdpCom implements PacketSender, Runnable {
     private static final String TAG = "UdpCom";
     private Node node;
-    private final DatagramSocket svrSocket;
+    private final DatagramChannel svrChannel;
     private final ZeroTierOneService ztService;
 
-    UdpCom(ZeroTierOneService zeroTierOneService, DatagramSocket datagramSocket) {
-        this.svrSocket = datagramSocket;
+    UdpCom(ZeroTierOneService zeroTierOneService, DatagramChannel datagramChannel) {
+        this.svrChannel = datagramChannel;
         this.ztService = zeroTierOneService;
     }
 
@@ -31,15 +32,14 @@ public class UdpCom implements PacketSender, Runnable {
     }
 
     @Override // com.zerotier.sdk.PacketSender
-    public int onSendPacketRequested(long j, InetSocketAddress inetSocketAddress, byte[] bArr, int i) {
-        if (this.svrSocket == null) {
+    public int onSendPacketRequested(long j, InetSocketAddress inetSocketAddress, ByteBuffer bArr, int i) {
+        if (this.svrChannel == null) {
             Log.e(TAG, "Attempted to send packet on a null socket");
             return -1;
         }
         try {
-            DatagramPacket datagramPacket = new DatagramPacket(bArr, bArr.length, inetSocketAddress);
-            DebugLog.d(TAG, "onSendPacketRequested: Sent " + datagramPacket.getLength() + " bytes to " + inetSocketAddress.toString());
-            this.svrSocket.send(datagramPacket);
+            DebugLog.d(TAG, "onSendPacketRequested: Sent " + bArr.remaining() + " bytes to " + inetSocketAddress.toString());
+            this.svrChannel.send(bArr, inetSocketAddress);
             return 0;
         } catch (Exception unused) {
             return -1;
@@ -50,23 +50,22 @@ public class UdpCom implements PacketSender, Runnable {
         Log.d(TAG, "UDP Listen Thread Started.");
         try {
             long[] jArr = new long[1];
-            byte[] bArr = new byte[16384];
-            while (!Thread.interrupted()) {
+            ByteBuffer buf = ByteBuffer.allocateDirect(16384);
+            while (this.svrChannel.isOpen()) {
                 jArr[0] = 0;
-                DatagramPacket datagramPacket = new DatagramPacket(bArr, 16384);
                 try {
-                    this.svrSocket.receive(datagramPacket);
-                    if (datagramPacket.getLength() > 0) {
-                        byte[] bArr2 = new byte[datagramPacket.getLength()];
-                        System.arraycopy(datagramPacket.getData(), 0, bArr2, 0, datagramPacket.getLength());
-                        DebugLog.d(TAG, "Got " + datagramPacket.getLength() + " Bytes From: " + datagramPacket.getAddress().toString() + ":" + datagramPacket.getPort());
-                        ResultCode processWirePacket = this.node.processWirePacket(System.currentTimeMillis(), -1, new InetSocketAddress(datagramPacket.getAddress(), datagramPacket.getPort()), bArr2, jArr);
+                    SocketAddress recvSockAddr = this.svrChannel.receive(buf);
+                    buf.flip();
+                    if (buf.remaining() > 0) {
+                        DebugLog.d(TAG, "Got " + buf.remaining() + " Bytes From: " + recvSockAddr);
+                        ResultCode processWirePacket = this.node.processWirePacket(System.currentTimeMillis(), -1, (InetSocketAddress) recvSockAddr, buf, jArr);
                         if (processWirePacket != ResultCode.RESULT_OK) {
                             Log.e(TAG, "processWirePacket returned: " + processWirePacket.toString());
                             this.ztService.shutdown();
                         }
                         this.ztService.setNextBackgroundTaskDeadline(jArr[0]);
                     }
+                    buf.clear();
                 } catch (SocketTimeoutException ignored) {
                 }
             }

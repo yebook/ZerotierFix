@@ -65,14 +65,14 @@ import org.greenrobot.eventbus.EventBus;
 import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
 
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.net.DatagramSocket;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.DatagramChannel;
+import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -92,9 +92,9 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
     private final DataStore dataStore = new DataStore(this);
     private final EventBus eventBus = EventBus.getDefault();
     private final Map<Long, VirtualNetworkConfig> virtualNetworkConfigMap = new HashMap();
-    FileInputStream in;
-    FileOutputStream out;
-    DatagramSocket svrSocket;
+    FileChannel vpnInFileChannel;
+    FileChannel vpnOutFileChannel;
+    DatagramChannel svrChannel;
     ParcelFileDescriptor vpnSocket;
     private int bindCount = 0;
     private boolean disableIPv6 = false;
@@ -340,19 +340,19 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         synchronized (this) {
             try {
                 // 创建本地 ZT 服务 Socket，监听本地端口
-                if (this.svrSocket == null) {
-                    this.svrSocket = new DatagramSocket(null);
-                    this.svrSocket.setReuseAddress(true);
-                    this.svrSocket.setSoTimeout(1000);
-                    this.svrSocket.bind(new InetSocketAddress(9994));
+                if (this.svrChannel == null) {
+                    this.svrChannel = DatagramChannel.open();
+                    this.svrChannel.socket().setReuseAddress(true);
+                    this.svrChannel.socket().setSoTimeout(1000);
+                    this.svrChannel.socket().bind(new InetSocketAddress(9994));
                 }
-                if (!protect(this.svrSocket)) {
+                if (!protect(this.svrChannel.socket())) {
                     Log.e(TAG, "Error protecting UDP socket from feedback loop.");
                 }
 
                 // 创建本地节点
                 if (this.node == null) {
-                    this.udpCom = new UdpCom(this, this.svrSocket);
+                    this.udpCom = new UdpCom(this, this.svrChannel);
                     this.tunTapAdapter = new TunTapAdapter(this, networkId);
 
                     // 创建节点对象并初始化
@@ -422,9 +422,14 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
     }
 
     public void stopZeroTier() {
-        if (this.svrSocket != null) {
-            this.svrSocket.close();
-            this.svrSocket = null;
+        if (this.svrChannel != null) {
+            try {
+                this.svrChannel.close();
+            }
+            catch (Exception e) {
+                Log.e(TAG, "Error closing UDP socket: " + e, e);
+            }
+            this.svrChannel = null;
         }
         if (this.udpThread != null && this.udpThread.isAlive()) {
             this.udpThread.interrupt();
@@ -800,14 +805,22 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         if (this.vpnSocket != null) {
             try {
                 this.vpnSocket.close();
-                this.in.close();
-                this.out.close();
             } catch (Exception e) {
                 Log.e(TAG, "Error closing VPN socket: " + e, e);
             }
+            try {
+                this.vpnInFileChannel.close();
+            } catch (Exception e) {
+                Log.e(TAG, "Error closing VPN In FileChannel: " + e, e);
+            }
+            try {
+                this.vpnOutFileChannel.close();
+            } catch (Exception e) {
+                Log.e(TAG, "Error closing VPN Out FileChannel: " + e, e);
+            }
             this.vpnSocket = null;
-            this.in = null;
-            this.out = null;
+            this.vpnInFileChannel = null;
+            this.vpnOutFileChannel = null;
         }
 
         // 配置 VPN
@@ -927,10 +940,12 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
             this.eventBus.post(new VPNErrorEvent(getString(R.string.toast_vpn_application_not_prepared)));
             return false;
         }
-        this.in = new FileInputStream(this.vpnSocket.getFileDescriptor());
-        this.out = new FileOutputStream(this.vpnSocket.getFileDescriptor());
+        //noinspection resource
+        this.vpnInFileChannel = new java.io.FileInputStream(this.vpnSocket.getFileDescriptor()).getChannel();
+        //noinspection resource
+        this.vpnOutFileChannel = new java.io.FileOutputStream(this.vpnSocket.getFileDescriptor()).getChannel();
         this.tunTapAdapter.setVpnSocket(this.vpnSocket);
-        this.tunTapAdapter.setFileStreams(this.in, this.out);
+        this.tunTapAdapter.setFileChannels(this.vpnInFileChannel, this.vpnOutFileChannel);
         this.tunTapAdapter.startThreads();
 
         // 状态栏提示

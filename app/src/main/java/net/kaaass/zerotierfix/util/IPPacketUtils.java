@@ -6,6 +6,7 @@ import androidx.core.view.MotionEventCompat;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
 
 public class IPPacketUtils {
     private static final String TAG = "IPPacketUtils";
@@ -36,34 +37,83 @@ public class IPPacketUtils {
         }
     }
 
-    public static InetAddress getDestIP(byte[] bArr) {
-        byte iPVersion = getIPVersion(bArr);
-        if (iPVersion == 4) {
-            byte[] bArr2 = new byte[4];
-            System.arraycopy(bArr, 16, bArr2, 0, 4);
-            try {
-                return InetAddress.getByAddress(bArr2);
-            } catch (UnknownHostException e) {
-                Log.e(TAG, "Error creating InetAddress: " + e.getMessage(), e);
+    public static InetAddress getSourceIP(ByteBuffer buffer) {
+        buffer.mark();
+        int currPos = buffer.position();
+        try {
+            byte iPVersion = getIPVersion(buffer);
+            if (iPVersion == 4) {
+                buffer.position(currPos + 12);
+                byte[] bArr2 = new byte[4];
+                buffer.get(bArr2);
+                try {
+                    return InetAddress.getByAddress(bArr2);
+                } catch (UnknownHostException e) {
+                    Log.e(TAG, "Error creating InetAddress: " + e.getMessage(), e);
+                    return null;
+                }
+            } else if (iPVersion == 6) {
+                buffer.position(currPos + 8);
+                byte[] bArr3 = new byte[16];
+                buffer.get(bArr3);
+                try {
+                    return InetAddress.getByAddress(bArr3);
+                } catch (UnknownHostException e) {
+                    Log.e(TAG, "Error creating InetAddress: " + e.getMessage(), e);
+                    return null;
+                }
+            } else {
+                Log.e(TAG, "Unknown IP version");
                 return null;
             }
-        } else if (iPVersion == 6) {
-            byte[] bArr3 = new byte[16];
-            System.arraycopy(bArr, 24, bArr3, 0, 16);
-            try {
-                return InetAddress.getByAddress(bArr3);
-            } catch (UnknownHostException e) {
-                Log.e(TAG, "Error creating InetAddress: " + e.getMessage(), e);
+        } finally {
+            buffer.reset();
+        }
+    }
+
+    public static InetAddress getDestIP(ByteBuffer buffer) {
+        buffer.mark();
+        int currPos = buffer.position();
+        try {
+            byte iPVersion = getIPVersion(buffer);
+            if (iPVersion == 4) {
+                buffer.position(currPos + 16);
+                byte[] bArr2 = new byte[4];
+                buffer.get(bArr2);
+                try {
+                    return InetAddress.getByAddress(bArr2);
+                } catch (UnknownHostException e) {
+                    Log.e(TAG, "Error creating InetAddress: " + e.getMessage(), e);
+                    return null;
+                }
+            } else if (iPVersion == 6) {
+                buffer.position(currPos + 24);
+                byte[] bArr3 = new byte[16];
+                buffer.get(bArr3);
+                try {
+                    return InetAddress.getByAddress(bArr3);
+                } catch (UnknownHostException e) {
+                    Log.e(TAG, "Error creating InetAddress: " + e.getMessage(), e);
+                    return null;
+                }
+            } else {
+                Log.e(TAG, "Unknown IP version");
                 return null;
             }
-        } else {
-            Log.e(TAG, "Unknown IP version");
-            return null;
+        } finally {
+            buffer.reset();
         }
     }
 
     public static byte getIPVersion(byte[] bArr) {
         return (byte) (bArr[0] >> 4);
+    }
+
+    public static byte getIPVersion(ByteBuffer buffer) {
+        buffer.mark();
+        byte ret = (byte) (buffer.get() >> 4);
+        buffer.reset();
+        return ret;
     }
 
     public static long calculateChecksum(byte[] bArr, long j, int i, int i2) {

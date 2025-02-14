@@ -2,6 +2,7 @@ package net.kaaass.zerotierfix.service;
 
 import android.os.ParcelFileDescriptor;
 import android.support.v4.media.session.PlaybackStateCompat;
+import android.system.Os;
 import android.util.Log;
 
 import com.zerotier.sdk.Node;
@@ -14,8 +15,6 @@ import net.kaaass.zerotierfix.util.DebugLog;
 import net.kaaass.zerotierfix.util.IPPacketUtils;
 import net.kaaass.zerotierfix.util.InetAddressUtils;
 
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -24,6 +23,7 @@ import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
 import java.util.HashMap;
 import java.util.Objects;
 
@@ -37,10 +37,10 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
     private final long networkId;
     private final ZeroTierOneService ztService;
     private ARPTable arpTable = new ARPTable();
-    private FileInputStream in;
+    private FileChannel vpnInFileChannel;
     private NDPTable ndpTable = new NDPTable();
     private Node node;
-    private FileOutputStream out;
+    private FileChannel vpnOutFileChannel;
     private Thread receiveThread;
     private ParcelFileDescriptor vpnSocket;
 
@@ -82,9 +82,9 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
         this.vpnSocket = vpnSocket;
     }
 
-    public void setFileStreams(FileInputStream fileInputStream, FileOutputStream fileOutputStream) {
-        this.in = fileInputStream;
-        this.out = fileOutputStream;
+    public void setFileChannels(FileChannel in, FileChannel out) {
+        this.vpnInFileChannel = in;
+        this.vpnOutFileChannel = out;
     }
 
     public void addRouteAndNetwork(Route route, long networkId) {
@@ -123,32 +123,34 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
                 // 转发 TUN 消息至 Zerotier
                 try {
                     Log.d(TunTapAdapter.TAG, "TUN Receive Thread Started");
-                    var buffer = ByteBuffer.allocate(32767);
+                    var buffer = ByteBuffer.allocateDirect(32767);
                     buffer.order(ByteOrder.LITTLE_ENDIAN);
-                    while (!isInterrupted()) {
+                    while (TunTapAdapter.this.vpnInFileChannel.isOpen()) {
                         try {
-                            int readCount = TunTapAdapter.this.in.read(buffer.array());
+                            int readCount = TunTapAdapter.this.vpnInFileChannel.read(buffer);
                             if (readCount > 0) {
                                 DebugLog.d(TunTapAdapter.TAG, "Sending packet to ZeroTier. " + readCount + " bytes.");
-                                var readData = new byte[readCount];
-                                System.arraycopy(buffer.array(), 0, readData, 0, readCount);
-                                byte iPVersion = IPPacketUtils.getIPVersion(readData);
+                                buffer.flip();
+                                byte iPVersion = IPPacketUtils.getIPVersion(buffer);
                                 if (iPVersion == 4) {
-                                    TunTapAdapter.this.handleIPv4Packet(readData);
+                                    TunTapAdapter.this.handleIPv4Packet(buffer);
                                 } else if (iPVersion == 6) {
-                                    TunTapAdapter.this.handleIPv6Packet(readData);
+                                    TunTapAdapter.this.handleIPv6Packet(buffer);
                                 } else {
                                     Log.e(TunTapAdapter.TAG, "Unknown IP version");
                                 }
                                 buffer.clear();
+                            } else if (readCount == -1) {
+                                break;
                             } else {
-                                Thread.sleep(10);
+                                //Thread.sleep(10);
                             }
                         } catch (IOException e) {
                             Log.e(TunTapAdapter.TAG, "Error in TUN Receive: " + e.getMessage(), e);
                         }
                     }
-                } catch (InterruptedException ignored) {
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
                 Log.d(TunTapAdapter.TAG, "TUN Receive Thread ended");
                 // 关闭 ARP、NDP 表
@@ -161,11 +163,11 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
         this.receiveThread.start();
     }
 
-    private void handleIPv4Packet(byte[] packetData) {
+    private void handleIPv4Packet(ByteBuffer byteBuffer) {
         boolean isMulticast;
         long destMac;
-        var destIP = IPPacketUtils.getDestIP(packetData);
-        var sourceIP = IPPacketUtils.getSourceIP(packetData);
+        var destIP = IPPacketUtils.getDestIP(byteBuffer);
+        var sourceIP = IPPacketUtils.getSourceIP(byteBuffer);
         var virtualNetworkConfig = this.ztService.getVirtualNetworkConfig(this.networkId);
 
         if (virtualNetworkConfig == null) {
@@ -222,7 +224,7 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
             } else {
                 destMac = this.arpTable.getMacForAddress(destIP);
             }
-            var result = this.node.processVirtualNetworkFrame(System.currentTimeMillis(), this.networkId, localMac, destMac, IPV4_PACKET, 0, packetData, nextDeadline);
+            var result = this.node.processVirtualNetworkFrame(System.currentTimeMillis(), this.networkId, localMac, destMac, IPV4_PACKET, 0, byteBuffer, nextDeadline);
             if (result != ResultCode.RESULT_OK) {
                 Log.e(TAG, "Error calling processVirtualNetworkFrame: " + result.toString());
                 return;
@@ -233,8 +235,8 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
             // 目标 MAC 未知，进行 ARP 查询
             Log.d(TAG, "Unknown dest MAC address.  Need to look it up. " + destIP);
             destMac = InetAddressUtils.BROADCAST_MAC_ADDRESS;
-            packetData = this.arpTable.getRequestPacket(localMac, localV4Address, destIP);
-            var result = this.node.processVirtualNetworkFrame(System.currentTimeMillis(), this.networkId, localMac, destMac, ARP_PACKET, 0, packetData, nextDeadline);
+            ByteBuffer arpReqPacket = this.arpTable.getRequestPacket(localMac, localV4Address, destIP);
+            var result = this.node.processVirtualNetworkFrame(System.currentTimeMillis(), this.networkId, localMac, destMac, ARP_PACKET, 0, arpReqPacket, nextDeadline);
             if (result != ResultCode.RESULT_OK) {
                 Log.e(TAG, "Error sending ARP packet: " + result.toString());
                 return;
@@ -244,9 +246,9 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
         }
     }
 
-    private void handleIPv6Packet(byte[] packetData) {
-        var destIP = IPPacketUtils.getDestIP(packetData);
-        var sourceIP = IPPacketUtils.getSourceIP(packetData);
+    private void handleIPv6Packet(ByteBuffer byteBuffer) {
+        var destIP = IPPacketUtils.getDestIP(byteBuffer);
+        var sourceIP = IPPacketUtils.getSourceIP(byteBuffer);
         var virtualNetworkConfig = this.ztService.getVirtualNetworkConfig(this.networkId);
 
         if (virtualNetworkConfig == null) {
@@ -297,7 +299,7 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
         // 确定目标 MAC 地址
         long destMac;
         boolean sendNSPacket = false;
-        if (this.isNeighborSolicitation(packetData)) {
+        if (this.isNeighborSolicitation(byteBuffer)) {
             // 收到本地 NS 报文，根据 NDP 表记录确定是否广播查询
             if (this.ndpTable.hasMacForAddress(destIP)) {
                 destMac = this.ndpTable.getMacForAddress(destIP);
@@ -307,7 +309,7 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
         } else if (this.isIPv6Multicast(destIP)) {
             // 多播报文
             destMac = multicastAddressToMAC(destIP);
-        } else if (this.isNeighborAdvertisement(packetData)) {
+        } else if (this.isNeighborAdvertisement(byteBuffer)) {
             // 收到本地 NA 报文
             if (this.ndpTable.hasMacForAddress(destIP)) {
                 destMac = this.ndpTable.getMacForAddress(destIP);
@@ -328,7 +330,7 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
         }
         // 发送数据包
         if (destMac != 0L) {
-            var result = this.node.processVirtualNetworkFrame(System.currentTimeMillis(), this.networkId, localMac, destMac, IPV6_PACKET, 0, packetData, nextDeadline);
+            var result = this.node.processVirtualNetworkFrame(System.currentTimeMillis(), this.networkId, localMac, destMac, IPV6_PACKET, 0, byteBuffer, nextDeadline);
             if (result != ResultCode.RESULT_OK) {
                 Log.e(TAG, "Error calling processVirtualNetworkFrame: " + result.toString());
             } else {
@@ -342,7 +344,7 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
                 destMac = InetAddressUtils.ipv6ToMulticastAddress(destIP);
             }
             Log.d(TAG, "Sending Neighbor Solicitation");
-            packetData = this.ndpTable.getNeighborSolicitationPacket(sourceIP, destIP, localMac);
+            ByteBuffer packetData = this.ndpTable.getNeighborSolicitationPacket(sourceIP, destIP, localMac);
             var result = this.node.processVirtualNetworkFrame(System.currentTimeMillis(), this.networkId, localMac, destMac, IPV6_PACKET, 0, packetData, nextDeadline);
             if (result != ResultCode.RESULT_OK) {
                 Log.e(TAG, "Error calling processVirtualNetworkFrame: " + result.toString());
@@ -357,10 +359,14 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
     public void interrupt() {
         if (this.receiveThread != null) {
             try {
-                this.in.close();
-                this.out.close();
+                this.vpnInFileChannel.close();
             } catch (IOException e) {
-                Log.e(TAG, "Error stopping in/out: " + e.getMessage(), e);
+                Log.e(TAG, "Error stopping in: " + e.getMessage(), e);
+            }
+            try {
+                this.vpnOutFileChannel.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Error stopping out: " + e.getMessage(), e);
             }
             this.receiveThread.interrupt();
             try {
@@ -374,12 +380,32 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
         this.receiveThread.join();
     }
 
-    private boolean isNeighborSolicitation(byte[] packetData) {
-        return packetData[6] == 58 && packetData[40] == -121;
+    private boolean isNeighborSolicitation(ByteBuffer byteBuffer) {
+        byteBuffer.mark();
+        int currPos = byteBuffer.position();
+        try {
+            byteBuffer.position(currPos + 6);
+            if (byteBuffer.get() != 58) return false;
+            byteBuffer.position(currPos + 40);
+            if (byteBuffer.get() != -121) return false;
+            return true;
+        } finally {
+            byteBuffer.reset();
+        }
     }
 
-    private boolean isNeighborAdvertisement(byte[] packetData) {
-        return packetData[6] == 58 && packetData[40] == -120;
+    private boolean isNeighborAdvertisement(ByteBuffer byteBuffer) {
+        byteBuffer.mark();
+        int currPos = byteBuffer.position();
+        try {
+            byteBuffer.position(currPos + 6);
+            if (byteBuffer.get() != 58) return false;
+            byteBuffer.position(currPos + 40);
+            if (byteBuffer.get() != -120) return false;
+            return true;
+        } finally {
+            byteBuffer.reset();
+        }
     }
 
     public boolean isRunning() {
@@ -395,17 +421,17 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
      */
     @Override
     public void onVirtualNetworkFrame(long networkId, long srcMac, long destMac, long etherType,
-                                      long vlanId, byte[] frameData) {
+                                      long vlanId, ByteBuffer frameData) {
         DebugLog.d(TAG, "Got Virtual Network Frame. " +
                 " Network ID: " + StringUtils.networkIdToString(networkId) +
                 " Source MAC: " + StringUtils.macAddressToString(srcMac) +
                 " Dest MAC: " + StringUtils.macAddressToString(destMac) +
                 " Ether type: " + StringUtils.etherTypeToString(etherType) +
-                " VLAN ID: " + vlanId + " Frame Length: " + frameData.length);
+                " VLAN ID: " + vlanId + " Frame Length: " + frameData.remaining());
         if (this.vpnSocket == null) {
             Log.e(TAG, "vpnSocket is null!");
-        } else if (this.in == null || this.out == null) {
-            Log.e(TAG, "no in/out streams");
+        } else if (this.vpnInFileChannel == null || this.vpnOutFileChannel == null) {
+            Log.e(TAG, "no vpnFileChannel");
         } else if (etherType == ARP_PACKET) {
             // 收到 ARP 包。更新 ARP 表，若需要则进行应答
             Log.d(TAG, "Got ARP Packet");
@@ -423,7 +449,7 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
                 // 构造并返回 ARP 应答
                 if (localV4Address != null) {
                     var nextDeadline = new long[1];
-                    var packetData = this.arpTable.getReplyPacket(networkConfig.getMac(),
+                    ByteBuffer packetData = this.arpTable.getReplyPacket(networkConfig.getMac(),
                             localV4Address, arpReply.getDestMac(), arpReply.getDestAddress());
                     var result = this.node
                             .processVirtualNetworkFrame(System.currentTimeMillis(), networkId,
@@ -439,7 +465,7 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
             }
         } else if (etherType == IPV4_PACKET) {
             // 收到 IPv4 包。根据需要发送至 TUN
-            DebugLog.d(TAG, "Got IPv4 packet. Length: " + frameData.length + " Bytes");
+            DebugLog.d(TAG, "Got IPv4 packet. Length: " + frameData.remaining() + " Bytes");
             try {
                 var sourceIP = IPPacketUtils.getSourceIP(frameData);
                 if (sourceIP != null) {
@@ -452,13 +478,19 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
                         this.arpTable.setAddress(sourceIP, srcMac);
                     }
                 }
-                this.out.write(frameData);
+
+                int written = this.vpnOutFileChannel.write(frameData);
+                if (written == -1) {
+                    Log.e(TAG, "Error writing data to vpn socket: " + written);
+                } else if (frameData.remaining() > 0) {
+                    Log.e(TAG, "Error writing data to vpn socket: written: " + written + " remaining " + frameData.remaining());
+                }
             } catch (Exception e) {
                 Log.e(TAG, "Error writing data to vpn socket: " + e.getMessage(), e);
             }
         } else if (etherType == IPV6_PACKET) {
             // 收到 IPv6 包。根据需要发送至 TUN，并更新 NDP 表
-            DebugLog.d(TAG, "Got IPv6 packet. Length: " + frameData.length + " Bytes");
+            DebugLog.d(TAG, "Got IPv6 packet. Length: " + frameData.remaining() + " Bytes");
             try {
                 var sourceIP = IPPacketUtils.getSourceIP(frameData);
                 if (sourceIP != null) {
@@ -471,14 +503,19 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
                         this.ndpTable.setAddress(sourceIP, srcMac);
                     }
                 }
-                this.out.write(frameData);
+                int written = this.vpnOutFileChannel.write(frameData);
+                if (written == -1) {
+                    Log.e(TAG, "Error writing data to vpn socket: " + written);
+                } else if (frameData.remaining() > 0) {
+                    Log.e(TAG, "Error writing data to vpn socket: written: " + written + " remaining " + frameData.remaining());
+                }
             } catch (Exception e) {
                 Log.e(TAG, "Error writing data to vpn socket: " + e.getMessage(), e);
             }
-        } else if (frameData.length >= 14) {
-            Log.d(TAG, "Unknown Packet Type Received: 0x" + String.format("%02X%02X", frameData[12], frameData[13]));
+        } else if (frameData.remaining() >= 14) {
+            Log.d(TAG, "Unknown Packet Type Received: 0x" + String.format("%02X%02X", frameData.get(12), frameData.get(13)));
         } else {
-            Log.d(TAG, "Unknown Packet Received.  Packet Length: " + frameData.length);
+            Log.d(TAG, "Unknown Packet Received.  Packet Length: " + frameData.remaining());
         }
     }
 
