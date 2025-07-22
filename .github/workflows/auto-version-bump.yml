@@ -1,0 +1,51 @@
+name: Auto Version Bump & Tag
+
+on:
+  workflow_dispatch:  # 手动触发
+  push:
+    branches:
+      - master  # 当 master 有代码 push 时触发（你可换成 release 分支）
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fetch all tags
+        run: git fetch --tags
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          latest_tag=$(git tag --sort=-v:refname | grep '^v' | head -n 1)
+          echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
+
+      - name: Calculate next version
+        id: next_tag
+        run: |
+          latest="${{ steps.get_tag.outputs.latest_tag }}"
+          echo "Latest tag: $latest"
+          if [[ -z "$latest" ]]; then
+            next="v1.0.0"
+          else
+            IFS='.' read -ra parts <<< "${latest#v}"
+            major=${parts[0]}
+            minor=${parts[1]}
+            patch=${parts[2]}
+            patch=$((patch + 1))
+            next="v$major.$minor.$patch"
+          fi
+          echo "next_tag=$next" >> $GITHUB_OUTPUT
+
+      - name: Create and push new tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git tag ${{ steps.next_tag.outputs.next_tag }}
+          git push origin ${{ steps.next_tag.outputs.next_tag }}
